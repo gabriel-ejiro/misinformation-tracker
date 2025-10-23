@@ -1,0 +1,46 @@
+name: Deploy
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: eu-north-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip Lambdas
+        run: |
+          mkdir -p dist
+          (cd lambdas/ingest && zip -r ../../dist/ingest.zip .)
+          (cd lambdas/api    && zip -r ../../dist/api.zip .)
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_NAME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init/Apply
+        working-directory: infra
+        env:
+          TF_VAR_github_owner: ${{ github.repository_owner }}
+          TF_VAR_github_repo:  ${{ github.event.repository.name }}
+          TF_VAR_sources_json: ${{ secrets.TF_VAR_sources_json }}
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Show endpoints
+        working-directory: infra
+        run: |
+          terraform output
