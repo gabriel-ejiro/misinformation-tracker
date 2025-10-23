@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8">
+<title>Misinformation Tracker</title>
+<style>
+body{font-family:system-ui,Segoe UI,Arial;margin:2rem;max-width:900px}
+.card{border:1px solid #ddd;border-radius:12px;padding:1rem;margin:.75rem 0}
+h1{margin:0 0 .25rem}
+small{color:#666}
+input,select{padding:.5rem;margin:.25rem 0}
+</style>
+<h1>Misinformation Tracker</h1>
+<input id="q" placeholder="Search text..." />
+<button onclick="runSearch()">Search</button>
+<select id="src"><option value="">— by source —</option></select>
+<button onclick="bySource()">Filter</button>
+<button onclick="latest()">Latest</button>
+<div id="list"></div>
+<script>
+const API = "https://REPLACE_WITH_API_ID.execute-api.eu-north-1.amazonaws.com";
+async function latest(){ render(await fetch(API+"/latest").then(r=>r.json())); }
+async function bySource(){
+  const name=document.getElementById('src').value;
+  render(await fetch(API+`/by-source?name=${encodeURIComponent(name)}`).then(r=>r.json()));
+}
+async function runSearch(){
+  const q=document.getElementById('q').value;
+  render(await fetch(API+`/search?q=${encodeURIComponent(q)}`).then(r=>r.json()));
+}
+function render(items){
+  const list=document.getElementById('list'); list.innerHTML='';
+  const sources=[...new Set(items.map(i=>i.source))].sort();
+  const sel=document.getElementById('src'); sel.innerHTML='<option value="">— by source —</option>'+sources.map(s=>`<option>${s}</option>`).join('');
+  items.forEach(i=>{
+    const el=document.createElement('div'); el.className='card';
+    el.innerHTML=`<b>${i.title||''}</b><br><small>${i.source} • score ${i.score?.toFixed?.(2)||0}</small><p>${i.summary||''}</p><a href="${i.url}" target="_blank">Open source</a>`;
+    list.appendChild(el);
+  });
+}
+latest();
+</script>
