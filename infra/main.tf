@@ -1,4 +1,6 @@
-provider "aws" { region = var.region }
+provider "aws" {
+  region = var.region
+}
 
 locals {
   name = var.project_name
@@ -11,8 +13,15 @@ resource "aws_dynamodb_table" "items" {
   hash_key     = "pk"
   range_key    = "sk"
 
-  attribute { name = "pk"; type = "S" }
-  attribute { name = "sk"; type = "N" }
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "N"
+  }
 
   ttl {
     attribute_name = "ttl"
@@ -25,6 +34,7 @@ resource "aws_cloudwatch_log_group" "ingest" {
   name              = "/aws/lambda/${local.name}-ingest"
   retention_in_days = 7
 }
+
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/aws/lambda/${local.name}-api"
   retention_in_days = 7
@@ -34,7 +44,11 @@ resource "aws_cloudwatch_log_group" "api" {
 data "aws_iam_policy_document" "lambda_assume" {
   statement {
     actions = ["sts:AssumeRole"]
-    principals { type = "Service", identifiers = ["lambda.amazonaws.com"] }
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
   }
 }
 
@@ -42,15 +56,32 @@ resource "aws_iam_role" "ingest_role" {
   name               = "${local.name}-ingest-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
+
 resource "aws_iam_role_policy" "ingest_policy" {
   name = "${local.name}-ingest-policy"
   role = aws_iam_role.ingest_role.id
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
-      { Effect="Allow", Action=["dynamodb:PutItem"], Resource=aws_dynamodb_table.items.arn },
-      { Effect="Allow", Action=["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], Resource="*" },
-      { Effect="Allow", Action=["comprehend:DetectSentiment"], Resource="*" }
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem"]
+        Resource = aws_dynamodb_table.items.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["comprehend:DetectSentiment"]
+        Resource = "*"
+      }
     ]
   })
 }
@@ -59,14 +90,27 @@ resource "aws_iam_role" "api_role" {
   name               = "${local.name}-api-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
+
 resource "aws_iam_role_policy" "api_policy" {
   name = "${local.name}-api-policy"
   role = aws_iam_role.api_role.id
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
-      { Effect="Allow", Action=["dynamodb:Scan","dynamodb:Query","dynamodb:GetItem"], Resource=aws_dynamodb_table.items.arn },
-      { Effect="Allow", Action=["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], Resource="*" }
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem"]
+        Resource = aws_dynamodb_table.items.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      }
     ]
   })
 }
@@ -79,13 +123,15 @@ resource "aws_lambda_function" "ingest" {
   runtime          = "python3.11"
   filename         = "${path.module}/../dist/ingest.zip"
   source_code_hash = filebase64sha256("${path.module}/../dist/ingest.zip")
+
   environment {
     variables = {
-      TABLE_NAME   = aws_dynamodb_table.items.name
-      SOURCES_JSON = var.sources_json
+      TABLE_NAME     = aws_dynamodb_table.items.name
+      SOURCES_JSON   = var.sources_json
       USE_COMPREHEND = var.use_comprehend ? "true" : "false"
     }
   }
+
   depends_on = [aws_cloudwatch_log_group.ingest]
 }
 
@@ -96,11 +142,13 @@ resource "aws_lambda_function" "api" {
   runtime          = "python3.11"
   filename         = "${path.module}/../dist/api.zip"
   source_code_hash = filebase64sha256("${path.module}/../dist/api.zip")
+
   environment {
     variables = {
       TABLE_NAME = aws_dynamodb_table.items.name
     }
   }
+
   depends_on = [aws_cloudwatch_log_group.api]
 }
 
@@ -142,11 +190,13 @@ resource "aws_apigatewayv2_route" "latest" {
   route_key = "GET /latest"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
+
 resource "aws_apigatewayv2_route" "bysource" {
   api_id    = aws_apigatewayv2_api.http.id
   route_key = "GET /by-source"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
+
 resource "aws_apigatewayv2_route" "search" {
   api_id    = aws_apigatewayv2_api.http.id
   route_key = "GET /search"
@@ -167,24 +217,38 @@ resource "aws_apigatewayv2_stage" "prod" {
   auto_deploy = true
 }
 
-output "api_base_url" { value = aws_apigatewayv2_api.http.api_endpoint }
+output "api_base_url" {
+  value = aws_apigatewayv2_api.http.api_endpoint
+}
 
-# --- S3 static site for dashboard (HTTP only; add CloudFront later if you want TLS) ---
-resource "aws_s3_bucket" "site" { bucket = "${local.name}-site-${random_id.suffix.hex}" }
-resource "random_id" "suffix" { byte_length = 4 }
+# --- S3 static site for dashboard ---
+resource "random_id" "suffix" {
+  byte_length = 4
+}
+
+resource "aws_s3_bucket" "site" {
+  bucket = "${local.name}-site-${random_id.suffix.hex}"
+}
 
 resource "aws_s3_bucket_website_configuration" "site" {
   bucket = aws_s3_bucket.site.id
-  index_document { suffix = "index.html" }
+
+  index_document {
+    suffix = "index.html"
+  }
 }
 
 resource "aws_s3_bucket_policy" "public_read" {
   bucket = aws_s3_bucket.site.id
+
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
-      Sid="PublicRead", Effect="Allow", Principal="*",
-      Action=["s3:GetObject"], Resource=["${aws_s3_bucket.site.arn}/*"]
+      Sid       = "PublicRead"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = ["s3:GetObject"]
+      Resource  = ["${aws_s3_bucket.site.arn}/*"]
     }]
   })
 }
@@ -197,4 +261,7 @@ resource "aws_s3_object" "index" {
   etag         = filemd5("${path.module}/../web/index.html")
 }
 
-output "site_url" { value = aws_s3_bucket_website_configuration.site.website_endpoint }
+output "site_url" {
+  value = aws_s3_bucket_website_configuration.site.website_endpoint
+}
+
