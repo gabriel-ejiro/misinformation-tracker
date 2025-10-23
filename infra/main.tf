@@ -44,7 +44,6 @@ resource "aws_cloudwatch_log_group" "api" {
 data "aws_iam_policy_document" "lambda_assume" {
   statement {
     actions = ["sts:AssumeRole"]
-
     principals {
       type        = "Service"
       identifiers = ["lambda.amazonaws.com"]
@@ -230,6 +229,15 @@ resource "aws_s3_bucket" "site" {
   bucket = "${local.name}-site-${random_id.suffix.hex}"
 }
 
+# Allow public bucket policy to take effect (keep public ACLs blocked)
+resource "aws_s3_bucket_public_access_block" "site" {
+  bucket                  = aws_s3_bucket.site.id
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = false
+  restrict_public_buckets = false
+}
+
 resource "aws_s3_bucket_website_configuration" "site" {
   bucket = aws_s3_bucket.site.id
 
@@ -244,13 +252,16 @@ resource "aws_s3_bucket_policy" "public_read" {
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
-      Sid       = "PublicRead"
-      Effect    = "Allow"
-      Principal = "*"
-      Action    = ["s3:GetObject"]
+      Sid       = "PublicRead",
+      Effect    = "Allow",
+      Principal = "*",
+      Action    = ["s3:GetObject"],
       Resource  = ["${aws_s3_bucket.site.arn}/*"]
     }]
   })
+
+  # Ensure public access block is set first, or PutBucketPolicy can be denied
+  depends_on = [aws_s3_bucket_public_access_block.site]
 }
 
 resource "aws_s3_object" "index" {
@@ -264,4 +275,3 @@ resource "aws_s3_object" "index" {
 output "site_url" {
   value = aws_s3_bucket_website_configuration.site.website_endpoint
 }
-
