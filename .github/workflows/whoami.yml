@@ -1,0 +1,21 @@
+name: WhoAmI
+on: { workflow_dispatch: {} }
+
+jobs:
+  whoami:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: eu-north-1
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Show account, region, tables
+        run: |
+          aws sts get-caller-identity
+          aws configure get region
+          aws dynamodb list-tables
