@@ -1,5 +1,8 @@
-name: Unlock Terraform State (one-off)
+name: Deploy
+
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch: {}
 
 concurrency:
@@ -7,19 +10,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unlock:
+  apply:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
     env:
       AWS_REGION: eu-north-1
+      PROJECT_NAME: misinfo
       TFSTATE_BUCKET: misinfo-tfstate-eu-north-1-misinfo
       TFSTATE_KEY: infra/terraform.tfstate
       TF_LOCK_TABLE: misinfo-tf-locks
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Zip Lambdas
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          (cd lambdas/ingest && zip -r ../../dist/ingest.zip .)
+          (cd lambdas/api    && zip -r ../../dist/api.zip .)
 
       - name: Configure AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -30,76 +41,114 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # 1) Show anything in the lock table that could block you
-      - name: List current lock rows (diagnostic)
+      # --- Diagnose and align regions; create/clean lock table in BUCKET region ---
+      - name: Diagnose AWS context
         run: |
           set -euo pipefail
-          echo "== All lock rows in ${TF_LOCK_TABLE} =="
+          echo "== Caller identity =="
+          aws sts get-caller-identity
+          echo "== Runner AWS_REGION env =="
+          echo "${AWS_REGION}"
+          echo "== S3 bucket location =="
+          aws s3api get-bucket-location --bucket "${TFSTATE_BUCKET}" || true
+          echo "== DynamoDB tables in ${AWS_REGION} =="
+          aws dynamodb list-tables --region "${AWS_REGION}" || true
+
+      - name: Ensure lock table exists in S3 bucket's region & clear stale lock
+        run: |
+          set -euo pipefail
+
+          # 1) Discover actual S3 bucket region (Terraform backend must use THIS)
+          BUCKET_REGION=$(aws s3api get-bucket-location --bucket "${TFSTATE_BUCKET}" --query 'LocationConstraint' --output text)
+          if [ "${BUCKET_REGION}" = "None" ] || [ "${BUCKET_REGION}" = "null" ]; then BUCKET_REGION="us-east-1"; fi
+          echo "BUCKET_REGION=${BUCKET_REGION}" | tee -a $GITHUB_ENV
+
+          # 2) Create lock table in same region if missing
+          if ! aws dynamodb describe-table --table-name "${TF_LOCK_TABLE}" --region "${BUCKET_REGION}" >/dev/null 2>&1; then
+            echo "Creating DynamoDB lock table ${TF_LOCK_TABLE} in ${BUCKET_REGION}"
+            aws dynamodb create-table \
+              --table-name "${TF_LOCK_TABLE}" \
+              --attribute-definitions AttributeName=LockID,AttributeType=S \
+              --key-schema AttributeName=LockID,KeyType=HASH \
+              --billing-mode PAY_PER_REQUEST \
+              --region "${BUCKET_REGION}"
+          else
+            echo "Lock table ${TF_LOCK_TABLE} already exists in ${BUCKET_REGION}"
+          fi
+
+          # 3) Wait for ACTIVE
+          for i in {1..30}; do
+            STATUS=$(aws dynamodb describe-table --table-name "${TF_LOCK_TABLE}" --region "${BUCKET_REGION}" --query 'Table.TableStatus' --output text 2>/dev/null || true)
+            [ "$STATUS" = "ACTIVE" ] && break
+            sleep 3
+          done
+          echo "Lock table status: ${STATUS:-unknown}"
+
+          # 4) Delete any stale lock row by its partition key: bucket/key
+          PK="${TFSTATE_BUCKET}/${TFSTATE_KEY}"
+          echo "Deleting possible stale lock row: LockID=${PK} (region ${BUCKET_REGION})"
+          aws dynamodb delete-item \
+            --table-name "${TF_LOCK_TABLE}" \
+            --key "{\"LockID\":{\"S\":\"${PK}\"}}" \
+            --region "${BUCKET_REGION}" || true
+
+          # 5) Show remaining rows (diagnostic)
+          echo "== Lock table scan after delete (region ${BUCKET_REGION}) =="
           aws dynamodb scan \
             --table-name "${TF_LOCK_TABLE}" \
             --projection-expression "LockID,ID,Info" \
+            --region "${BUCKET_REGION}" \
             --output json | jq -r '.Items'
 
-      # 2) Hard-delete the exact lock row Terraform uses: LockID == bucket/key
-      - name: Delete stale lock row by partition key
-        run: |
-          set -euo pipefail
-          PK="${TFSTATE_BUCKET}/${TFSTATE_KEY}"
-          echo "Deleting DynamoDB item LockID=${PK} from ${TF_LOCK_TABLE}"
-          aws dynamodb delete-item \
-            --table-name "${TF_LOCK_TABLE}" \
-            --key "{\"LockID\":{\"S\":\"${PK}\"}}"
-
-      # 3) Verify deletion
-      - name: Verify lock row deletion
-        run: |
-          set -euo pipefail
-          PK="${TFSTATE_BUCKET}/${TFSTATE_KEY}"
-          echo "Verifying deletion of LockID=${PK}"
-          aws dynamodb get-item \
-            --table-name "${TF_LOCK_TABLE}" \
-            --key "{\"LockID\":{\"S\":\"${PK}\"}}" \
-            --output json | jq -r '.Item'
-          # If anything returns, fail:
-          TEST=$(aws dynamodb get-item \
-            --table-name "${TF_LOCK_TABLE}" \
-            --key "{\"LockID\":{\"S\":\"${PK}\"}}" \
-            --output json | jq -r '.Item | length')
-          if [ "${TEST}" != "0" ] && [ "${TEST}" != "null" ]; then
-            echo "::error::Lock row still present. Check IAM perms for dynamodb:DeleteItem on ${TF_LOCK_TABLE}."
-            exit 1
-          fi
-          echo "Lock row is gone."
-
-      # 4) (Belt & suspenders) init same backend and force-unlock with UUID from your logs
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform init (exact backend)
+      - name: Terraform Init (uses bucket's real region)
         working-directory: infra
+        env:
+          TF_VAR_project_name: ${{ env.PROJECT_NAME }}
+          TF_VAR_region: ${{ env.AWS_REGION }}
+          TF_VAR_github_owner: ${{ github.repository_owner }}
+          TF_VAR_github_repo:  ${{ github.event.repository.name }}
+          TF_VAR_sources_json: ${{ secrets.TF_VAR_sources_json }}
         run: |
           set -euo pipefail
-          terraform init -lock-timeout=5m \
+          terraform init -upgrade -lock-timeout=5m \
             -backend-config="bucket=${TFSTATE_BUCKET}" \
             -backend-config="key=${TFSTATE_KEY}" \
-            -backend-config="region=${AWS_REGION}" \
+            -backend-config="region=${BUCKET_REGION}" \
             -backend-config="dynamodb_table=${TF_LOCK_TABLE}" \
             -backend-config="encrypt=true"
 
-      - name: Terraform force-unlock with known UUID (best-effort)
+      # Belt & suspenders: try the UUID you saw in logs (harmless if no lock)
+      - name: Force unlock with known UUID (best-effort)
         working-directory: infra
         run: |
           set -euo pipefail
           terraform force-unlock -force 25987fdb-8820-15f5-6fa1-ca7403383f9f || true
 
-      # 5) Final check: list any remaining items
-      - name: Final lock table check
+      - name: Terraform Apply
+        working-directory: infra
+        env:
+          TF_VAR_project_name: ${{ env.PROJECT_NAME }}
+          TF_VAR_region: ${{ env.AWS_REGION }}
+          TF_VAR_github_owner: ${{ github.repository_owner }}
+          TF_VAR_github_repo:  ${{ github.event.repository.name }}
+          TF_VAR_sources_json: ${{ secrets.TF_VAR_sources_json }}
         run: |
           set -euo pipefail
-          echo "== Lock table after cleanup =="
-          aws dynamodb scan \
-            --table-name "${TF_LOCK_TABLE}" \
-            --projection-expression "LockID,ID,Info" \
-            --output json | jq -r '.Items'
+          terraform apply -lock-timeout=5m -auto-approve
+
+      - name: Show outputs
+        working-directory: infra
+        run: terraform output
+
+      - name: Clear lock on failure/cancel (best-effort)
+        if: failure() || cancelled()
+        working-directory: infra
+        run: |
+          set -euo pipefail
+          terraform force-unlock -force 25987fdb-8820-15f5-6fa1-ca7403383f9f || true
+
 
 
