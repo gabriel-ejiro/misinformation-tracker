@@ -1,4 +1,4 @@
-name: Destroy
+name: Unlock Terraform State (one-off)
 on:
   workflow_dispatch: {}
 
@@ -7,7 +7,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  destroy:
+  unlock:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -21,14 +21,61 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Terraform init
+      # 1) Show anything in the lock table that could block you
+      - name: List current lock rows (diagnostic)
+        run: |
+          set -euo pipefail
+          echo "== All lock rows in ${TF_LOCK_TABLE} =="
+          aws dynamodb scan \
+            --table-name "${TF_LOCK_TABLE}" \
+            --projection-expression "LockID,ID,Info" \
+            --output json | jq -r '.Items'
+
+      # 2) Hard-delete the exact lock row Terraform uses: LockID == bucket/key
+      - name: Delete stale lock row by partition key
+        run: |
+          set -euo pipefail
+          PK="${TFSTATE_BUCKET}/${TFSTATE_KEY}"
+          echo "Deleting DynamoDB item LockID=${PK} from ${TF_LOCK_TABLE}"
+          aws dynamodb delete-item \
+            --table-name "${TF_LOCK_TABLE}" \
+            --key "{\"LockID\":{\"S\":\"${PK}\"}}"
+
+      # 3) Verify deletion
+      - name: Verify lock row deletion
+        run: |
+          set -euo pipefail
+          PK="${TFSTATE_BUCKET}/${TFSTATE_KEY}"
+          echo "Verifying deletion of LockID=${PK}"
+          aws dynamodb get-item \
+            --table-name "${TF_LOCK_TABLE}" \
+            --key "{\"LockID\":{\"S\":\"${PK}\"}}" \
+            --output json | jq -r '.Item'
+          # If anything returns, fail:
+          TEST=$(aws dynamodb get-item \
+            --table-name "${TF_LOCK_TABLE}" \
+            --key "{\"LockID\":{\"S\":\"${PK}\"}}" \
+            --output json | jq -r '.Item | length')
+          if [ "${TEST}" != "0" ] && [ "${TEST}" != "null" ]; then
+            echo "::error::Lock row still present. Check IAM perms for dynamodb:DeleteItem on ${TF_LOCK_TABLE}."
+            exit 1
+          fi
+          echo "Lock row is gone."
+
+      # 4) (Belt & suspenders) init same backend and force-unlock with UUID from your logs
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init (exact backend)
         working-directory: infra
         run: |
           set -euo pipefail
@@ -39,7 +86,20 @@ jobs:
             -backend-config="dynamodb_table=${TF_LOCK_TABLE}" \
             -backend-config="encrypt=true"
 
-      - name: Terraform destroy
+      - name: Terraform force-unlock with known UUID (best-effort)
         working-directory: infra
-        run: terraform destroy -lock-timeout=5m -auto-approve
+        run: |
+          set -euo pipefail
+          terraform force-unlock -force 25987fdb-8820-15f5-6fa1-ca7403383f9f || true
+
+      # 5) Final check: list any remaining items
+      - name: Final lock table check
+        run: |
+          set -euo pipefail
+          echo "== Lock table after cleanup =="
+          aws dynamodb scan \
+            --table-name "${TF_LOCK_TABLE}" \
+            --projection-expression "LockID,ID,Info" \
+            --output json | jq -r '.Items'
+
 
