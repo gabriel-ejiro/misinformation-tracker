@@ -6,15 +6,15 @@ resource "aws_iam_policy" "api_exec" {
     Version = "2012-10-17",
     Statement = [
       {
-        Sid    = "LogsWrite"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"]
+        Sid      = "LogsWrite"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/misinfo-api*"
       },
       {
-        Sid    = "DdbReadQuery"
-        Effect = "Allow"
-        Action = ["dynamodb:GetItem","dynamodb:Query","dynamodb:Scan"]
+        Sid      = "DdbReadQuery"
+        Effect   = "Allow"
+        Action   = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"]
         Resource = local.ddb_items_table_arn
       }
     ]
@@ -34,15 +34,15 @@ resource "aws_iam_policy" "ingest_exec" {
     Version = "2012-10-17",
     Statement = [
       {
-        Sid    = "LogsWrite"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"]
+        Sid      = "LogsWrite"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/misinfo-ingest*"
       },
       {
-        Sid    = "DdbWrite"
-        Effect = "Allow"
-        Action = ["dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:BatchWriteItem","dynamodb:GetItem"]
+        Sid      = "DdbWrite"
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:BatchWriteItem", "dynamodb:GetItem"]
         Resource = local.ddb_items_table_arn
       }
     ]

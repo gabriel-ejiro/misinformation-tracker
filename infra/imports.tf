@@ -1,4 +1,4 @@
-# DynamoDB table already exists
+# DB table already exists
 import {
   to = aws_dynamodb_table.items
   id = "misinfo-items"
@@ -22,14 +22,4 @@ import {
 import {
   to = aws_iam_role.api_role
   id = "misinfo-api-role"
-}
-
-# Inline role policies (if you define them in Terraform)
-import {
-  to = aws_iam_role_policy.ingest_policy
-  id = "misinfo-ingest-role:misinfo-ingest-policy"
-}
-import {
-  to = aws_iam_role_policy.api_policy
-  id = "misinfo-api-role:misinfo-api-policy"
 }

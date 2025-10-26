@@ -1,7 +1,7 @@
 locals {
   account_id          = "872926860633"
   region              = "eu-north-1"
-  gha_deploy_role     = "MISINFOTRACKER"        # your GitHub Actions role name
+  gha_deploy_role     = "MISINFOTRACKER" # your GitHub Actions role name
   site_bucket         = "misinfo-site-39506c13"
   tfstate_bucket      = "misinfo-tfstate-eu-north-1-misinfo"
   ddb_items_table_arn = "arn:aws:dynamodb:eu-north-1:872926860633:table/misinfo-items"
@@ -14,7 +14,7 @@ locals {
 resource "aws_iam_policy" "gha_ci" {
   name        = "misinfo-gha-deploy"
   description = "Permissions for GitHub Actions to deploy misinfo stack"
-  policy      = jsonencode({
+  policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       # ---- S3 READ (refresh)
@@ -45,14 +45,14 @@ resource "aws_iam_policy" "gha_ci" {
         Sid    = "S3ManageTfstateAndSite"
         Effect = "Allow"
         Action = [
-          "s3:CreateBucket","s3:DeleteBucket",
-          "s3:PutBucketPolicy","s3:PutBucketWebsite","s3:DeleteBucketWebsite",
-          "s3:PutBucketOwnershipControls","s3:PutBucketPublicAccessBlock","s3:PutEncryptionConfiguration",
-          "s3:PutBucketTagging","s3:PutBucketCors","s3:PutBucketLogging","s3:PutLifecycleConfiguration",
-          "s3:PutBucketAcl","s3:PutBucketNotification","s3:PutBucketVersioning",
-          "s3:PutReplicationConfiguration","s3:PutBucketRequestPayment",
-          "s3:ListBucket","s3:ListBucketMultipartUploads",
-          "s3:PutObject","s3:PutObjectTagging","s3:DeleteObject","s3:DeleteObjectVersion","s3:AbortMultipartUpload"
+          "s3:CreateBucket", "s3:DeleteBucket",
+          "s3:PutBucketPolicy", "s3:PutBucketWebsite", "s3:DeleteBucketWebsite",
+          "s3:PutBucketOwnershipControls", "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration",
+          "s3:PutBucketTagging", "s3:PutBucketCors", "s3:PutBucketLogging", "s3:PutLifecycleConfiguration",
+          "s3:PutBucketAcl", "s3:PutBucketNotification", "s3:PutBucketVersioning",
+          "s3:PutReplicationConfiguration", "s3:PutBucketRequestPayment",
+          "s3:ListBucket", "s3:ListBucketMultipartUploads",
+          "s3:PutObject", "s3:PutObjectTagging", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:AbortMultipartUpload"
         ]
         Resource = [
           "arn:aws:s3:::${local.tfstate_bucket}",
@@ -69,10 +69,10 @@ resource "aws_iam_policy" "gha_ci" {
         Action = [
           "dynamodb:DescribeTable",
           "dynamodb:DescribeContinuousBackups",
-          "dynamodb:DescribeTimeToLive","dynamodb:UpdateTimeToLive",
-          "dynamodb:ListTagsOfResource","dynamodb:TagResource","dynamodb:UntagResource",
-          "dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:DeleteItem",
-          "dynamodb:BatchWriteItem","dynamodb:Scan","dynamodb:Query"
+          "dynamodb:DescribeTimeToLive", "dynamodb:UpdateTimeToLive",
+          "dynamodb:ListTagsOfResource", "dynamodb:TagResource", "dynamodb:UntagResource",
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem",
+          "dynamodb:BatchWriteItem", "dynamodb:Scan", "dynamodb:Query"
         ]
         Resource = [
           local.ddb_lock_table_arn,
@@ -85,11 +85,11 @@ resource "aws_iam_policy" "gha_ci" {
         Sid    = "LambdaManageMisinfo"
         Effect = "Allow"
         Action = [
-          "lambda:CreateFunction","lambda:UpdateFunctionCode","lambda:UpdateFunctionConfiguration","lambda:DeleteFunction",
-          "lambda:AddPermission","lambda:RemovePermission",
-          "lambda:GetFunction","lambda:GetFunctionConfiguration","lambda:GetPolicy",
-          "lambda:ListTags","lambda:TagResource","lambda:UntagResource",
-          "lambda:CreateAlias","lambda:UpdateAlias","lambda:DeleteAlias"
+          "lambda:CreateFunction", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:DeleteFunction",
+          "lambda:AddPermission", "lambda:RemovePermission",
+          "lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetPolicy",
+          "lambda:ListTags", "lambda:TagResource", "lambda:UntagResource",
+          "lambda:CreateAlias", "lambda:UpdateAlias", "lambda:DeleteAlias"
         ]
         Resource = [
           local.lambda_api_arn,
@@ -101,15 +101,15 @@ resource "aws_iam_policy" "gha_ci" {
 
       # ---- CloudWatch Logs
       {
-        Sid    = "LogsDescribe"
-        Effect = "Allow"
-        Action = ["logs:DescribeLogGroups","logs:DescribeLogStreams","logs:GetLogEvents","logs:ListTagsForResource"]
+        Sid      = "LogsDescribe"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups", "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:ListTagsForResource"]
         Resource = "*"
       },
       {
         Sid    = "LogsManageRetention"
         Effect = "Allow"
-        Action = ["logs:CreateLogGroup","logs:DeleteLogGroup","logs:PutRetentionPolicy"]
+        Action = ["logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:PutRetentionPolicy"]
         Resource = [
           "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/misinfo-ingest",
           "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/misinfo-ingest:*",
@@ -120,15 +120,15 @@ resource "aws_iam_policy" "gha_ci" {
 
       # ---- API Gateway v2 + global tagging
       {
-        Sid    = "ApiGatewayV2Full"
-        Effect = "Allow"
-        Action = ["apigateway:GET","apigateway:POST","apigateway:PUT","apigateway:PATCH","apigateway:DELETE"]
+        Sid      = "ApiGatewayV2Full"
+        Effect   = "Allow"
+        Action   = ["apigateway:GET", "apigateway:POST", "apigateway:PUT", "apigateway:PATCH", "apigateway:DELETE"]
         Resource = "arn:aws:apigateway:${local.region}::/*"
       },
       {
-        Sid    = "GlobalTagging"
-        Effect = "Allow"
-        Action = ["tag:GetResources","tag:TagResources","tag:UntagResources"]
+        Sid      = "GlobalTagging"
+        Effect   = "Allow"
+        Action   = ["tag:GetResources", "tag:TagResources", "tag:UntagResources"]
         Resource = "*"
       },
 
@@ -136,8 +136,8 @@ resource "aws_iam_policy" "gha_ci" {
       {
         Sid    = "EventBridgeManage"
         Effect = "Allow"
-        Action = ["events:DescribeRule","events:PutRule","events:DeleteRule","events:PutTargets","events:RemoveTargets",
-                  "events:ListTagsForResource","events:TagResource","events:UntagResource"]
+        Action = ["events:DescribeRule", "events:PutRule", "events:DeleteRule", "events:PutTargets", "events:RemoveTargets",
+        "events:ListTagsForResource", "events:TagResource", "events:UntagResource"]
         Resource = local.events_rule_arn
       },
 
@@ -145,7 +145,7 @@ resource "aws_iam_policy" "gha_ci" {
       {
         Sid    = "IAMRead"
         Effect = "Allow"
-        Action = ["iam:GetRole","iam:GetRolePolicy","iam:ListRolePolicies"]
+        Action = ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies"]
         Resource = [
           "arn:aws:iam::${local.account_id}:role/misinfo-ingest-role",
           "arn:aws:iam::${local.account_id}:role/misinfo-api-role"

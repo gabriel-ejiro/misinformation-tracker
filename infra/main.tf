@@ -75,15 +75,15 @@ resource "aws_iam_policy" "api_exec" {
     Version = "2012-10-17",
     Statement = [
       {
-        Sid    = "LogsWrite"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"]
+        Sid      = "LogsWrite"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.name}-api*"
       },
       {
-        Sid    = "DdbReadQuery"
-        Effect = "Allow"
-        Action = ["dynamodb:GetItem","dynamodb:Query","dynamodb:Scan"]
+        Sid      = "DdbReadQuery"
+        Effect   = "Allow"
+        Action   = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"]
         Resource = aws_dynamodb_table.items.arn
       }
     ]
@@ -103,21 +103,21 @@ resource "aws_iam_policy" "ingest_exec" {
     Version = "2012-10-17",
     Statement = [
       {
-        Sid    = "LogsWrite"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"]
+        Sid      = "LogsWrite"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.name}-ingest*"
       },
       {
-        Sid    = "DdbWrite"
-        Effect = "Allow"
-        Action = ["dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:BatchWriteItem","dynamodb:GetItem"]
+        Sid      = "DdbWrite"
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:BatchWriteItem", "dynamodb:GetItem"]
         Resource = aws_dynamodb_table.items.arn
       },
       {
-        Sid    = "OptionalComprehend"
-        Effect = "Allow"
-        Action = ["comprehend:DetectSentiment"]
+        Sid      = "OptionalComprehend"
+        Effect   = "Allow"
+        Action   = ["comprehend:DetectSentiment"]
         Resource = "*"
       }
     ]
