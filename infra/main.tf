@@ -3,8 +3,12 @@ provider "aws" {
 }
 
 locals {
-  name = var.project_name
+  name       = var.project_name
+  account_id = data.aws_caller_identity.current.account_id
+  region     = var.region
 }
+
+data "aws_caller_identity" "current" {}
 
 # --- DynamoDB table (with TTL) ---
 resource "aws_dynamodb_table" "items" {
@@ -56,62 +60,73 @@ resource "aws_iam_role" "ingest_role" {
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
-resource "aws_iam_role_policy" "ingest_policy" {
-  name = "${local.name}-ingest-policy"
-  role = aws_iam_role.ingest_role.id
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["dynamodb:PutItem"]
-        Resource = aws_dynamodb_table.items.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["comprehend:DetectSentiment"]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
 resource "aws_iam_role" "api_role" {
   name               = "${local.name}-api-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
-resource "aws_iam_role_policy" "api_policy" {
-  name = "${local.name}-api-policy"
-  role = aws_iam_role.api_role.id
+# ---------- Managed execution policies (replace old inline policies) ----------
+
+# misinfo-api Lambda execution: read/query items; write logs
+resource "aws_iam_policy" "api_exec" {
+  name        = "${local.name}-api-exec"
+  description = "Execution policy for ${local.name}-api Lambda"
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem"]
+        Sid    = "LogsWrite"
+        Effect = "Allow"
+        Action = ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"]
+        Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.name}-api*"
+      },
+      {
+        Sid    = "DdbReadQuery"
+        Effect = "Allow"
+        Action = ["dynamodb:GetItem","dynamodb:Query","dynamodb:Scan"]
+        Resource = aws_dynamodb_table.items.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "api_exec_attach" {
+  role       = aws_iam_role.api_role.name
+  policy_arn = aws_iam_policy.api_exec.arn
+}
+
+# misinfo-ingest Lambda execution: write to items (and optional Comprehend); write logs
+resource "aws_iam_policy" "ingest_exec" {
+  name        = "${local.name}-ingest-exec"
+  description = "Execution policy for ${local.name}-ingest Lambda"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid    = "LogsWrite"
+        Effect = "Allow"
+        Action = ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"]
+        Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.name}-ingest*"
+      },
+      {
+        Sid    = "DdbWrite"
+        Effect = "Allow"
+        Action = ["dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:BatchWriteItem","dynamodb:GetItem"]
         Resource = aws_dynamodb_table.items.arn
       },
       {
+        Sid    = "OptionalComprehend"
         Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
+        Action = ["comprehend:DetectSentiment"]
         Resource = "*"
       }
     ]
   })
+}
+
+resource "aws_iam_role_policy_attachment" "ingest_exec_attach" {
+  role       = aws_iam_role.ingest_role.name
+  policy_arn = aws_iam_policy.ingest_exec.arn
 }
 
 # --- Package lambdas (expects built zips in ../dist from GitHub Actions) ---
@@ -260,7 +275,6 @@ resource "aws_s3_bucket_policy" "public_read" {
     }]
   })
 
-  # Ensure public access block is set first, or PutBucketPolicy can be denied
   depends_on = [aws_s3_bucket_public_access_block.site]
 }
 
@@ -275,3 +289,4 @@ resource "aws_s3_object" "index" {
 output "site_url" {
   value = aws_s3_bucket_website_configuration.site.website_endpoint
 }
+
